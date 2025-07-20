@@ -1,0 +1,101 @@
+AWS SAM Template Analysis - template.yaml
+=============================================
+
+LINE-BY-LINE BREAKDOWN:
+
+Resources:                                                                             => Declares the start of the CloudFormation/SAM resources section
+
+  FileUploader:                                                                        => Defines the first AWS Lambda function named "FileUploader" (logical ID)
+    Type: AWS::Serverless::Function                                                    => Specifies this is a SAM serverless function (Lambda)
+    Properties:                                                                        => Start of function configuration properties
+      Description: !Sub                                                               => Uses CloudFormation intrinsic function !Sub for string substitution
+        - Stack ${AWS::StackName} Function ${ResourceName}                            => Template for dynamic description
+        - ResourceName: FileUploader                                                  => Local parameter defining the resource name
+      CodeUri: src/FileUploader                                                       => Points to directory containing function's source code
+      Handler: handler.handler                                                        => Entry point: file "handler.py", function "handler"
+      Runtime: python3.10                                                             => Sets Lambda runtime environment to Python 3.10
+      MemorySize: 3008                                                                => Allocates 3008 MB memory (close to maximum for high performance)
+      Timeout: 60                                                                     => Function timeout of 60 seconds (consumer function)
+      Tracing: Active                                                                 => Enables AWS X-Ray tracing for monitoring and debugging
+      Policies:                                                                       => Start of IAM permissions section for this Lambda function
+        - S3FullAccessPolicy:                                                         => Grants full S3 access to specified bucket
+            BucketName: test-jbry                                                     => Target S3 bucket name for full access
+        - SQSSendMessagePolicy:                                                       => Grants permission to send messages to SQS queue
+            QueueName: !GetAtt FileUploadManagerQueue.Arn                            => Uses queue ARN (should be QueueName - potential issue)
+      Events:                                                                         => Defines what triggers this Lambda function
+        FileUploadManagerQueue:                                                       => Names the event source mapping
+          Type: SQS                                                                   => Specifies function is triggered by SQS messages
+          Properties:                                                                 => SQS event source configuration
+            Queue: !GetAtt FileUploadManagerQueue.Arn                                => Points to SQS queue that triggers function
+            BatchSize: 1                                                             => Process one message at a time
+
+  FileUploaderLogGroup:                                                               => Creates CloudWatch Log Group for FileUploader function
+    Type: AWS::Logs::LogGroup                                                         => CloudWatch Log Group resource type
+    DeletionPolicy: Retain                                                            => Logs persist even if stack is deleted
+    Properties:                                                                       => Log group configuration
+      LogGroupName: !Sub /aws/lambda/${FileUploader}                                 => Follows AWS Lambda naming convention
+
+  FileRetriever:                                                                      => Defines second Lambda function named "FileRetriever"
+    Type: AWS::Serverless::Function                                                   => Another SAM serverless function
+    Properties:                                                                       => Function configuration properties
+      Description: !Sub                                                              => Dynamic description with string substitution
+        - Stack ${AWS::StackName} Function ${ResourceName}                           => Template for description
+        - ResourceName: FileRetriever                                                => Local parameter for resource name
+      CodeUri: src/FileRetriever                                                     => Points to FileRetriever source code directory
+      Handler: handler.handler                                                       => Same handler pattern as FileUploader
+      Runtime: python3.10                                                            => Python 3.10 runtime environment
+      MemorySize: 3008                                                               => Same high memory allocation as FileUploader
+      Timeout: 300                                                                   => 5-minute timeout (much longer than FileUploader - suggests complex work)
+      Tracing: Active                                                                => X-Ray tracing enabled
+      Policies:                                                                      => IAM permissions for FileRetriever
+        - S3FullAccessPolicy:                                                        => Full access to S3 bucket
+            BucketName: test-jbry                                                    => Target S3 bucket name
+        - SQSSendMessagePolicy:                                                      => Permission to send messages to queue
+            QueueName: !GetAtt FileUploadManagerQueue.QueueName                     => Uses QueueName (correct format)
+      Environment:                                                                   => Defines environment variables for the function
+        Variables:                                                                   => Start of environment variable definitions
+          FILEUPLOADMANAGERQUEUE_QUEUE_NAME: !GetAtt FileUploadManagerQueue.QueueName => Queue name for SDK operations
+          FILEUPLOADMANAGERQUEUE_QUEUE_ARN: !GetAtt FileUploadManagerQueue.Arn      => Queue ARN for permissions
+          FILEUPLOADMANAGERQUEUE_QUEUE_URL: !Ref FileUploadManagerQueue             => Queue URL for SDK operations
+
+  FileRetrieverLogGroup:                                                             => CloudWatch Log Group for FileRetriever
+    Type: AWS::Logs::LogGroup                                                        => CloudWatch Log Group resource type
+    DeletionPolicy: Retain                                                           => Logs persist if stack deleted
+    Properties:                                                                      => Log group configuration
+      LogGroupName: !Sub /aws/lambda/${FileRetriever}                               => Lambda naming convention
+
+  FileUploadManagerQueue:                                                            => Defines the main SQS queue
+    Type: AWS::SQS::Queue                                                            => Standard SQS queue resource type
+    Properties:                                                                      => Queue configuration properties
+      VisibilityTimeout: 300                                                         => Messages hidden for 5 minutes after being received (should match consumer timeout of 60s)
+      MessageRetentionPeriod: 345600                                                 => Messages retained for 4 days (345600 seconds) if not processed
+      RedrivePolicy:                                                                 => Configuration for dead letter queue handling
+        deadLetterTargetArn: !GetAtt FileUploadManagerDeadLetter.Arn                => Points to dead letter queue
+        maxReceiveCount: 3                                                           => 3 attempts before sending to dead letter queue
+
+  FileUploadManagerDeadLetter:                                                       => Defines dead letter queue for failed messages
+    Type: AWS::SQS::Queue                                                            => Standard SQS queue for dead letters
+    Properties:                                                                      => Dead letter queue configuration
+      MessageRetentionPeriod: 345600                                                 => 4 days retention for failed messages
+
+Transform: AWS::Serverless-2016-10-31                                                => Specifies SAM transform version for CloudFormation processing
+
+ARCHITECTURE SUMMARY:
+===================
+1. FileRetriever: Producer function that sends messages to SQS queue
+2. FileUploadManagerQueue: Main SQS queue with dead letter handling
+3. FileUploader: Consumer function triggered by SQS messages
+4. Both functions have full access to "test-jbry" S3 bucket
+5. Failed messages go to dead letter queue after 3 attempts
+
+POTENTIAL ISSUES:
+================
+1. Line 18: SQSSendMessagePolicy uses queue ARN instead of QueueName
+2. Line 63: VisibilityTimeout (300s) should match consumer timeout (60s), not producer timeout
+3. Both functions have S3FullAccessPolicy - consider using more restrictive S3ReadPolicy/S3WritePolicy if full access isn't needed
+
+RECOMMENDATIONS:
+===============
+1. Fix SQSSendMessagePolicy in FileUploader to use QueueName
+2. Change VisibilityTimeout to 90-120 seconds to match FileUploader timeout
+3. Consider if both functions really need full S3 access 

@@ -1,0 +1,76 @@
+Resources:
+
+  FileUploader:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: FileUploader
+      CodeUri: src/FileUploader
+      Handler: handler.handler
+      Runtime: python3.10
+      MemorySize: 3008
+      Timeout: 60
+      Tracing: Active
+      Policies: 
+        - S3FullAccessPolicy:
+            BucketName: test-jbry
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt FileUploadManagerQueue.Arn
+      Events:
+        FileUploadManagerQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt FileUploadManagerQueue.Arn
+            BatchSize: 1
+
+  FileUploaderLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${FileUploader}
+
+  FileRetriever:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: FileRetriever
+      CodeUri: src/FileRetriever
+      Handler: handler.handler
+      Runtime: python3.10
+      MemorySize: 3008
+      Timeout: 300
+      Tracing: Active
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: test-jbry
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt FileUploadManagerQueue.QueueName
+      Environment:
+        Variables:
+          FILEUPLOADMANAGERQUEUE_QUEUE_NAME: !GetAtt FileUploadManagerQueue.QueueName
+          FILEUPLOADMANAGERQUEUE_QUEUE_ARN: !GetAtt FileUploadManagerQueue.Arn
+          FILEUPLOADMANAGERQUEUE_QUEUE_URL: !Ref FileUploadManagerQueue
+
+  FileRetrieverLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${FileRetriever}
+
+  FileUploadManagerQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 345600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt FileUploadManagerDeadLetter.Arn
+        maxReceiveCount: 3
+
+  FileUploadManagerDeadLetter:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 345600
+
+Transform: AWS::Serverless-2016-10-31

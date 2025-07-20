@@ -1,0 +1,40 @@
+# SAM Configuration File
+# This file stores default parameters for SAM CLI commands
+
+version = 0.1
+
+[default]
+[default.build]
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "sam-test-file-sqs-handler"
+s3_bucket = "test-jbry"
+s3_prefix = "sam-test-file-sqs-handler"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+disable_rollback = true
+image_repositories = []
+resolve_s3 = true
+
+[default.package]
+[default.package.parameters]
+s3_bucket = "test-jbry"
+s3_prefix = "sam-test-file-sqs-handler"
+region = "us-east-1"
+
+[default.sync]
+[default.sync.parameters]
+watch = true
+
+[default.local_start_api]
+[default.local_start_api.parameters]
+warm_containers = "EAGER"
+
+[default.local_start_lambda]
+[default.local_start_lambda.parameters]
+warm_containers = "EAGER"
